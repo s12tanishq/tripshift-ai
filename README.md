@@ -1,143 +1,142 @@
 # TripShift AI
 
-**Travel disruption and autonomous replanning agent** for TECHNOVA '26, Track 2: AI Agent Challenges at PCE, Nagpur.
+A travel disruption and autonomous replanning prototype for TECHNOVA '26, Track 2 at PCE, Nagpur.
 
-> One change can affect the entire journey. TripShift traces those dependencies, proposes the smallest feasible recovery, checks every proposal against explicit rules, and explains what still needs a human decision.
+**Current status:** a model-driven competition prototype with an optional Duffel provider search. Gemini or Groq calls local itinerary, dependency, validation, provider-evidence, and communication tools. The main journey and selectable recovery plans remain simulated. Duffel flight and hotel searches provide separate, timestamped evidence when a token is configured. The app does not book travel or send messages.
 
-## Project status
+## What works now
 
-**Planning / API exploration.** The current `agent.py` and `app.py` are intentionally small prototypes used to test model providers, tool calling, and Streamlit. They do **not** yet implement the travel product described below. The travel engine, scenarios, recovery plans, and finished interface are roadmap items. Do not present README features as already working during a demo.
+- Loads a five-step journey: flight, airport transfer, hotel check-in, client meeting, and team dinner.
+- Applies a numeric flight delay and recalculates downstream timing through explicit dependency rules.
+- Interprets IANA timezones and checks offsets, including daylight-saving transitions and trips across local timezones.
+- Explains the causal path, remaining slack, and hard-rule violation for each affected commitment.
+- Enforces earliest/latest hotel windows and minimum/maximum connection gaps where supplied.
+- Can search Duffel for flight and hotel offers, label test versus live data, show offer expiry, and check a returned flight's schedule against the journey graph.
+- Checks four candidate actions, including keeping the current journey, two replacement flights, and a late check-in/meeting change.
+- Scores feasible plans transparently by extra cost, arrival delay, and explicit edits. The model weighs the checked trade-offs and chooses a plan; the tool layer rejects invalid choices.
+- Maintains a Recovery Ladder: a model-selected plan plus a distinct validated fallback when available. A second-shock mode removes one replacement flight and forces a fresh model run and validation.
+- Drafts driver, hotel, and meeting updates for human review only.
+- Shows actual model tool calls in an observable action log and an honest no-feasible-plan result.
+- Runs from a dark, responsive Streamlit dashboard with restrained mint accents, tactile hover/press feedback, cubic-bezier transitions, and reduced-motion support.
 
-This project uses simulated itinerary, flight, and hotel data for the competition prototype. It does not check live availability, make bookings, or send messages.
+The model interprets the disruption, chooses which tools to call, and selects a checked recovery and fallback. When provider evidence has been searched, the model reads it through a separate tool. The local rules engine owns time arithmetic and hard constraints. Provider offers are **not** mapped to the simulated selectable plans: a fare may expire, its currency and rebooking cost may differ, and a hotel room result cannot confirm late check-in at an existing booking. If neither model provider completes the workflow, the app shows an error; it does not substitute a scripted recommendation.
 
-## The challenge
+## Run it
 
-An itinerary is a network of commitments. A delayed flight may leave too little time for a transfer, close a hotel check-in window, and make a meeting unreachable. Generating a fresh itinerary misses the important question: **which commitments became impossible, why, and what is the least disruptive valid repair?**
+```bash
+cd /Users/tanishqpachghare/Documents/TECHNOVA/agent-kit
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Add a GEMINI_API_KEY or GROQ_API_KEY to .env
+# Optional: add DUFFEL_ACCESS_TOKEN for provider flight/hotel searches
+streamlit run app.py
+```
 
-The submitted agent must demonstrate a multi-step workflow with tool use and decisions. Seven named responsibilities from the problem statement are implemented as **roles and tools**, not necessarily seven independent language models:
+The project already has a local `venv`, so on this machine `venv/bin/streamlit run app.py` should work without reinstalling. Streamlit prints the local URL, usually `http://localhost:8501`. A model call happens only when you press **Analyze journey**. Auto mode tries Gemini first, then Groq if Gemini fails. You can choose either provider directly in the app. **Check provider offers** starts a separate Duffel search; if you then analyze the journey, the model reads that snapshot.
 
-| Role | Responsibility |
-| --- | --- |
-| Itinerary | Read the journey and identify affected items |
-| Flight | Apply the disruption and inspect replacement options |
-| Dependency | Propagate timing changes through explicit constraints |
-| Hotel | Check arrival windows and alternatives |
-| Schedule | Check meetings, activities, preparation, and travel time |
-| Replanning | Compare candidates and repair rejected plans |
-| Communication | Draft messages for people affected by the chosen plan |
+For provider testing, create a [Duffel developer test token](https://duffel.com/docs/api/overview/test-mode) and place it in `.env` as `DUFFEL_ACCESS_TOKEN=...`. Duffel Stays requires [separate account access](https://duffel.com/docs/guides/getting-started-with-stays). If that access is missing, hotel evidence shows **unknown** while flight search can still work. A test token returns sandbox data that may have unrealistic schedules and prices; the interface labels it as test mode. Do not paste keys into chat or include `.env` in an archive.
 
-## Product contract
+The defaults are `gemini-3.5-flash-lite` and `openai/gpt-oss-120b`; set `GEMINI_MODEL` or `GROQ_MODEL` in `.env` to change them. Model access and rate limits depend on your provider account. The existing `.env` is local and ignored by Git; never include it in a submission archive.
 
-Given a structured journey and a disruption, TripShift should:
+CLI demo:
 
-1. Show the original itinerary and the precise changed event.
-2. Recompute downstream times and classify each item as **unaffected**, **at risk**, or **broken**. Each label must include the governing rule and remaining slack or violation.
-3. Find two or three recovery candidates when the scenario data permits. Include the option that changes the fewest commitments.
-4. Validate each candidate before recommending it. Reject broken connections, overlaps, closed check-in windows, invalid meeting arrival times, and other hard-constraint violations.
-5. Compare valid candidates by arrival delay, extra cost, number of changed items, priority commitments preserved, and resilience.
-6. Draft relevant stakeholder messages for user review. Applying a plan and sending messages require explicit human confirmation in any future connected version.
-7. Report **no feasible plan** with specific blockers when the available data cannot support one.
+```bash
+venv/bin/python agent.py --delay 210
+venv/bin/python agent.py --delay 210 --second-shock
+venv/bin/python agent.py --delay 210 --impossible
+venv/bin/python agent.py --delay 0
+venv/bin/python agent.py "Our flight is delayed by three and a half hours" --provider gemini
+venv/bin/python agent.py --inventory-only --delay 210
+venv/bin/python agent.py --delay 210 --search-offers
+```
 
-A validation badge means **valid against the current scenario snapshot and stated assumptions**. It does not imply a live seat, room, or reservation is confirmed.
+Run the deterministic checks:
 
-## Standout feature: Recovery Ladder
+```bash
+venv/bin/python -m unittest discover -s tests -v
+```
 
-A recovery plan includes a **checked fallback and an activation trigger**. Example: “Choose replacement flight A; if that flight becomes unavailable, use flight B and move the client meeting by 30 minutes.” The agent validates both branches before showing them, then demonstrates a second injected disruption by switching branches and recalculating the dependency chain.
+## Demo in four moves
 
-The ladder exposes its assumptions. If the fallback also fails, TripShift stops with the blocking constraints instead of inventing availability or claiming a guarantee. This is the intended meaning of a robust recovery, not a promise that external travel systems cannot fail.
+1. **Delay cascade:** the 210-minute delay moves the transfer and hotel arrival. Hotel check-in misses its latest start by 30 minutes; the fixed client meeting needs 60 more minutes of travel and preparation. The timeline and impact panel show the full dependency path.
+2. **Recovery Ladder:** the model compares checked alternatives and picks a primary and fallback. Switch the scenario mode to “Second shock” and analyze again. One replacement flight becomes unavailable; the model must choose among the remaining valid plans.
+3. **Impossible case:** mark all replacement or exception options unavailable. Every candidate is blocked, and the app reports why instead of presenting an invented recovery.
+4. **Provider evidence (optional):** press **Check provider offers**. The separate panel shows observed time, test/live mode, fare or rate, expiry, and the itinerary-rule result for flight timings. Analyze again to let the model inspect this evidence.
 
-## How the agent should work
+The journey and selectable recovery plans in the first three modes are simulated. Provider search results are separate evidence, and test-mode offers are sandbox data. A green validation badge means valid **against the stated timing rules**; it does not confirm a real seat, room, or stakeholder agreement.
+
+## System design
 
 ```text
 Disruption input
-    ↓
-Parse and normalize event → inspect itinerary → calculate dependency impact
-    ↓
-Search scenario alternatives → build candidate plans → deterministic validation
-    ↓                                         ↑
-Rank valid plans ← repair rejected candidates ┘
-    ↓
-Prepare Recovery Ladder → explain changes → draft messages for review
+  → Gemini or Groq model calls local tools
+  → read itinerary and record delay
+  → trace dependencies and recompute slack
+  → inspect optional Duffel search evidence
+  → inspect and validate simulated scenario options
+  → model selects a valid plan and fallback
+  → prepare messages for review
 ```
 
-The language model interprets the request, chooses tools, weighs valid trade-offs, and writes explanations. Typed Python code owns time arithmetic, dependency propagation, feasibility checks, and scoring. A plan may be shown as a recommendation only after validation.
+| Component | File | Responsibility |
+| --- | --- | --- |
+| Scenario fixture | `data/nagpur_demo.json` | Journey, rules, disruption, and simulated options |
+| Deterministic core | `tripshift/core.py` | Time calculations, graph order, propagation, validation, ranking |
+| Provider adapter | `tripshift/inventory.py` | Typed Duffel flights/hotels, source times, unknown states, flight schedule checks |
+| Agent workflow | `tripshift/agent.py` | Provider calls, tool loop, guarded decision, fallback, draft preparation |
+| Dashboard | `app.py` | Timeline, impact proof, plans, messages, action log |
+| CLI | `agent.py` | Repeatable terminal demo |
+| Checks | `tests/` | Cascade, tool dispatch, selection guard, fallback, timezones, provider parsing, and unknown states |
 
-### Planned data model
+The seven roles in the problem statement are responsibilities within this workflow, not seven separate language-model processes. The model makes genuine API tool calls and chooses the recovery. The deterministic core owns all time arithmetic. Each dependency has a source, target, minimum buffer, optional maximum gap, and reason. A graph connection alone does not make an item broken: the engine recomputes arrival times and slack before assigning a status. Fixed commitments remain fixed; movable ones shift only as needed. The validator rejects late check-in, meeting conflicts, connection gaps, unavailable options, and malformed journeys.
 
-- **Itinerary item:** stable ID, kind (flight, transfer, hotel, meeting, activity), local start/end, IANA timezone, location, status, flexibility, priority, cost, and data source.
-- **Dependency:** source item, target item, rule type, minimum buffer or deadline, hard/soft status, and explanation.
-- **Disruption:** item ID, changed field, old/new values, observation time, and source.
-- **Recovery plan:** proposed changes, cost and delay deltas, affected commitments, validation report, assumptions, and fallback trigger.
-- **Validation report:** pass/fail for every hard rule, remaining slack, unresolved unknowns, and a reproducible reason for each result.
+The fixture declares `Asia/Kolkata` and uses ISO timestamps with explicit offsets. Imported scenarios may declare a default `timezone`; an item may override it with `timezone`, `start_timezone`, or `end_timezone`. The parser checks that an explicit offset matches the named zone. For a local timestamp without an offset, it accepts an unambiguous time and rejects nonexistent or ambiguous daylight-saving times. Durations, delays, and dependency gaps are measured as elapsed time, then converted back to each event's local timezone for display.
 
-Times should be stored in timezone-aware form and displayed in local time. A graph edge only means an item *may* be affected; the engine must recompute slack to decide whether it is actually at risk or broken. Missing duration, policy, or availability data must appear as **unknown**, never silently become a valid assumption.
+Items may define `earliest_start`, `latest_start`, and `latest_end`. Dependencies may define `max_gap_minutes` in addition to `min_gap_minutes`. The Nagpur fixture now uses a hotel arrival window and a 30–90 minute landing-to-pickup window. These are checks against supplied scenario rules, not confirmations from a hotel or driver.
+
+### Provider evidence
+
+The fixture includes a BOM → NAG flight query for 15 October 2026 and a one-night hotel search around the Nagpur city centre. The Duffel adapter calls only search endpoints. It records when the response was observed and, when provided, the provider's creation time. It distinguishes `offers_found`, `no_results`, and `unknown`: an empty search does not prove there is no availability elsewhere, while a token or network failure stays unknown. A flight offer is checked as a possible schedule against the same dependency engine, but is not ranked by the simulated INR cost score or selectable as a plan. Expired and malformed offers are withheld from usable evidence. Hotel results show accommodation rates only and do not imply acceptance of a late check-in at the existing hotel.
+
+### Status language
+
+- **Unaffected:** known rules still have comfortable slack.
+- **At risk:** an event changed, a dependency upstream is broken, or the spare buffer is 15 minutes or less.
+- **Broken:** a hard deadline or timing rule is violated.
+- **Valid plan:** every hard rule in the fixture passes and required simulated options are available.
+
+The “Edits” figure counts **explicit plan changes**. Automatically propagated arrival shifts appear separately in the selected-plan proof.
 
 ## Interface direction
 
-The app should feel like a compact travel operations desk: **near-black canvas, one restrained neon mint accent, crisp typography, generous spacing, and visible causal relationships**. Risk colors communicate status; they are not decoration.
+The UI uses a near-black canvas (`#090B0D`), low-contrast charcoal surfaces, mint (`#78F5C6`) for actions and valid states, and amber/red only for risk and failure. It favors a clear three-part workspace: journey timeline, dependency diagnosis, and recovery options. The action log and messages sit below the decision area.
 
-```text
-TripShift        Journey: Mumbai → Nagpur            Scenario data
-─────────────────────────────────────────────────────────────────────
-Disruption: flight delayed 3h 30m               [Analyze impact]
+Motion is brief and functional: 260–320 ms panel entry with `cubic-bezier(.22,1,.36,1)`, 120–160 ms hover/press feedback with `cubic-bezier(.2,.8,.2,1)`, and a reduced-motion override. Streamlit stacks the columns on narrow screens. No perpetual neon effects or background animation are used.
 
-Journey timeline       Impact and dependency path     Recovery plans
-Flight → Transfer      Broken hotel check-in          A  Fastest
-       → Hotel         At-risk client meeting         B  Fewest changes
-       → Meeting       Rule + remaining slack         Cost · delay · proof
-                                                      Fallback trigger
-─────────────────────────────────────────────────────────────────────
-Messages to review                       Agent action log
-```
+## Delivery roadmap
 
-**Visual tokens:** canvas `#090B0D`, surface `#111619`, primary text `#F3F6F5`, muted text `#95A5A3`, border `#26332F`, accent `#78F5C6`. Use amber and red sparingly for risk and broken states. Keep icons simple and avoid large gradients, permanent glows, and decorative particle effects.
-
-**Motion:** cards and controls should feel responsive and tactile through opacity/transform transitions. Use `cubic-bezier(0.22, 1, 0.36, 1)` for 260–320 ms panel entrances, `cubic-bezier(0.2, 0.8, 0.2, 1)` for 120–160 ms hover/press feedback, and `cubic-bezier(0.4, 0, 0.2, 1)` for 200–240 ms state changes. Animate a dependency path once when its status changes; do not run continuous motion. Support keyboard focus, high contrast, and `prefers-reduced-motion`. On narrower screens, stack the three work areas while keeping the disruption and selected plan easy to reach.
-
-**Implementation direction:** retain Python for the agent and constraint engine. Build the first competition interface in Streamlit with focused CSS/custom components for the timeline, plan cards, and motion. If Streamlit's rerun model prevents the desired interaction quality, the UI can later move to a dedicated frontend without replacing the core engine.
-
-## Build roadmap
-
-| Phase | Deliverable | Done when |
+| Phase | State | Next acceptance target |
 | --- | --- | --- |
-| 1. Core journey | Typed itinerary and scenario fixtures | A seeded trip and delay load reproducibly |
-| 2. Dependency engine | Propagation, slack, and validation | Every affected item has a rule-backed status; impossible plans fail |
-| 3. Agent workflow | Travel-specific tools and bounded repair loop | The agent calls tools, revises rejected candidates, and reports blockers |
-| 4. Recovery Ladder | Ranked plans plus tested fallback trigger | A second disruption activates a revalidated branch |
-| 5. Interface and communication | Dark dashboard, comparisons, drafts, action log | Judges can follow cause → repair → proof without reading raw tool output |
-| 6. Demo hardening | Tests, setup instructions, offline fixture mode | The demo survives provider failure and the impossible-case scenario |
+| 1. Working agent prototype | Complete | Model tool calls, dependency proof, guarded choice, fallback, and dashboard |
+| 2. Constraint engine hardening | Complete | IANA timezone validation, daylight-saving-safe elapsed time, hotel windows, connection bounds, and edge-case tests |
+| 3. Provider data adapters | Implemented; account verification pending | Search Duffel flight/hotel offers, preserve source times and unknown states, and check flight schedules against the graph |
+| 4. Product reliability and UI | Planned | Provider retry guidance, saved scenarios, accessibility and device checks |
+| 5. Competition handoff | Planned | Demo rehearsal, failure-case walkthrough, clean submission and attribution |
+| 6. Real-world execution | Future | Authenticated holds or bookings and stakeholder messages, each behind human approval |
 
-**Competition priority:** complete phases 1–2 and one end-to-end valid recovery before expanding the interface. Then add ranked choices, the Recovery Ladder, and presentation polish. Live APIs and real bookings are outside the competition MVP.
+The competition demo currently needs a working model key and network access. Later integrations can replace simulated sources without replacing the constraint engine.
 
-## Demo scenarios and checks
+## Failure boundaries and trust
 
-1. **Delay cascade:** a delayed flight breaks a transfer buffer, closes hotel check-in, and threatens a meeting. Show the exact rule and slack at each step, then compare repairs.
-2. **Second shock:** remove the preferred replacement flight. Show the Recovery Ladder trigger, fallback validation, and changed communication drafts.
-3. **Impossible case:** no available candidate satisfies hard constraints. Show the blockers and what a human must resolve.
+- No real bookings, payments, or stakeholder messages occur.
+- Unknown external availability is not treated as confirmed.
+- Provider test-mode offers are labeled as sandbox data; no offer is treated as a booked seat or room.
+- Hotel search cannot verify a late check-in exception on the existing reservation.
+- No plan that fails a hard rule is shown as a recommendation.
+- The agent action log contains observable steps and results, not purported private model reasoning.
+- If all options fail, the result names the blockers and asks for a human decision.
+- `.env` is ignored by Git and read when analysis starts. The selected provider receives the entered disruption and simulated journey details. Diagnostic scripts from the original API test skeleton remain separate.
 
-Core checks should cover midnight and timezone crossings, tight transfer buffers, overlapping meetings, hotel policies, missing data, repeated disruption events, candidate validation, and provider outage. Use deterministic fixture data so the jury can replay the same result.
-
-## Current skeleton and local exploration
-
-The existing files are exploratory, not the final architecture:
-
-- `agent.py`: generic OpenAI-compatible tool-calling loop with Groq, Gemini, and optional Ollama configuration.
-- `app.py`: simple Streamlit interface for the generic loop.
-- `test_keys.py` and `list_gemini.py`: provider diagnostics.
-
-The current loop exposes a calculator, web search, and text-file writer. These are **not** travel availability or booking tools. The current default provider chain also does not include Ollama; offline operation must be tested and configured before it is advertised as working. Provider failover currently restarts a task, so future state-changing tools must avoid duplicate actions.
-
-To explore the skeleton, use a local virtual environment with the dependencies imported by these files (`openai`, `python-dotenv`, `ddgs`, and `streamlit`), set provider credentials in `.env`, then run `python agent.py "your goal"` or `streamlit run app.py`. This runs the **generic test agent**, not TripShift. A pinned `requirements.txt`, `.env.example`, and reproducible project setup are planned deliverables. Never commit `.env` or API keys.
-
-## Failure boundaries
-
-- All flight and hotel options in the MVP are simulated and labeled as such.
-- External information and model text cannot override validator rules.
-- No recommendation is labeled valid when a required constraint is unresolved.
-- A model outage falls back to a deterministic scenario explanation or an explicit unavailable state; it must not fabricate a plan.
-- The user reviews changes and messages. The prototype does not make bookings or contact stakeholders.
-- The interface shows an action log of observable tool calls and results, not supposed access to the model's private reasoning.
-
-## Event and ownership notes
-
-Track 2 permits and encourages AI tooling, but the team must be able to explain the implementation, prompt design, workflow, and failure boundaries. The event's general integrity rules prohibit presenting third-party work as one's own. Credit the origin of any reused skeleton or code, and follow additional instructions announced by the organizers. The Track 1 rule to push a GitHub commit every 20 minutes is not stated as a Track 2 requirement.
+Track 2 requires genuine agentic behavior and an explainable technical defense. The team's implementation, rule choices, and failure boundaries should be understandable to every presenter. Credit any reused code according to the event's integrity rules. The Track 1 rule about GitHub commits every 20 minutes is not stated as a Track 2 rule.
