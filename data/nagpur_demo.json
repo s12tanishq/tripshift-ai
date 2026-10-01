@@ -1,0 +1,28 @@
+{
+  "id": "nagpur-demo",
+  "title": "Mumbai to Nagpur | Client visit",
+  "timezone": "Asia/Kolkata",
+  "source": "Simulated competition fixture",
+  "items": [
+    {"id": "flight", "kind": "flight", "title": "Flight to Nagpur", "start": "2026-10-15T10:00:00+05:30", "end": "2026-10-15T14:00:00+05:30", "location": "Nagpur Airport", "movable": false},
+    {"id": "transfer", "kind": "transfer", "title": "Airport transfer", "start": "2026-10-15T14:30:00+05:30", "end": "2026-10-15T15:15:00+05:30", "location": "Nagpur", "movable": true},
+    {"id": "hotel", "kind": "hotel", "title": "Hotel check-in", "start": "2026-10-15T15:30:00+05:30", "end": "2026-10-15T16:00:00+05:30", "location": "City Centre Hotel", "movable": true, "earliest_start": "2026-10-15T15:00:00+05:30", "latest_start": "2026-10-15T18:30:00+05:30", "latest_end": "2026-10-15T21:30:00+05:30"},
+    {"id": "meeting", "kind": "meeting", "title": "Client meeting", "start": "2026-10-15T19:00:00+05:30", "end": "2026-10-15T20:00:00+05:30", "location": "Client office", "movable": false},
+    {"id": "activity", "kind": "activity", "title": "Team dinner", "start": "2026-10-15T20:30:00+05:30", "end": "2026-10-15T21:30:00+05:30", "location": "Nagpur", "movable": true, "latest_start": "2026-10-15T22:30:00+05:30"}
+  ],
+  "dependencies": [
+    {"source": "flight", "target": "transfer", "min_gap_minutes": 30, "max_gap_minutes": 90, "reason": "Allow 30–90 minutes between landing and pickup"},
+    {"source": "transfer", "target": "hotel", "min_gap_minutes": 15, "reason": "Allow 15 minutes from drop-off to check-in"},
+    {"source": "hotel", "target": "meeting", "min_gap_minutes": 30, "reason": "Allow 30 minutes for travel and preparation"},
+    {"source": "meeting", "target": "activity", "min_gap_minutes": 30, "reason": "Allow 30 minutes to reach dinner"}
+  ],
+  "disruption": {"item_id": "flight", "delay_minutes": 210, "label": "Flight delayed by 3 hours 30 minutes"},
+  "inventory_search": {"origin_iata": "BOM", "destination_iata": "NAG", "departure_date": "2026-10-15", "hotel_latitude": 21.1458, "hotel_longitude": 79.0882, "hotel_check_in": "2026-10-15", "hotel_check_out": "2026-10-16", "hotel_radius_km": 5},
+  "plans": [
+    {"id": "no_change", "title": "Keep the current journey", "summary": "Accept the delay if every commitment still fits.", "cost_delta_inr": 0, "changes": {}, "requires_option": ""},
+    {"id": "lower_cost_flight", "title": "Replace with lower-cost flight", "summary": "Arrive at 16:20; preserve hotel and meeting.", "cost_delta_inr": 2300, "changes": {"flight": {"start": "2026-10-15T12:05:00+05:30", "end": "2026-10-15T16:20:00+05:30"}}, "requires_option": "flight-b"},
+    {"id": "earlier_flight", "title": "Replace with earlier flight", "summary": "Arrive at 15:20 with more buffer.", "cost_delta_inr": 4800, "changes": {"flight": {"start": "2026-10-15T11:05:00+05:30", "end": "2026-10-15T15:20:00+05:30"}}, "requires_option": "flight-a"},
+    {"id": "keep_flight", "title": "Keep delayed flight and move commitments", "summary": "Request late check-in and reschedule the meeting.", "cost_delta_inr": 500, "changes": {"hotel": {"latest_start": "2026-10-15T21:00:00+05:30"}, "meeting": {"start": "2026-10-15T20:30:00+05:30", "end": "2026-10-15T21:30:00+05:30"}}, "requires_option": "late-checkin"}
+  ],
+  "options": {"flight-a": true, "flight-b": true, "late-checkin": true}
+}
